@@ -18,7 +18,7 @@ export const localDevelopment = {
       inputSchema: schema({path: str, offset: num, limit: num, max_chars: num}, ['path']),
       annotations: {readOnlyHint: true, openWorldHint: false}},
     {name: 'apply_patch',
-      description: 'Create, edit, move or delete files in the connected project with one patch envelope: *** Begin Patch / *** Add File: path / *** Update File: path with @@ context and space, - and + lines / *** Move to: path / *** Delete File: path / *** End Patch. All of it applies or none of it does.',
+      description: 'Create, edit, move or delete files in the connected project with one patch envelope: *** Begin Patch / *** Add File: path / *** Update File: path with @@ context and space, - and + lines / *** Move to: path / *** Delete File: path / *** End Patch. Every action is validated against the tree before anything is written, so a patch that does not fit changes nothing.',
       inputSchema: schema({patch: str}, ['patch']),
       annotations: {readOnlyHint: false, destructiveHint: true, openWorldHint: false}},
     {name: 'exec_command',

@@ -9,7 +9,7 @@ pasting terminal output back and forth.
 Paste this into Codex:
 
 ```text
-Install https://github.com/Nhahan/WebGPT/tree/main/skills/webgpt
+Install https://github.com/faithforone/WebGPT/tree/main/skills/webgpt
 Follow the included references/setup.md and set up everything needed.
 Handle installation, configuration and verification yourself; assume no setup knowledge.
 I authorize the local worker and HTTPS forwarding, sharing its private connection
@@ -37,7 +37,7 @@ connection. Access expires after 24 hours without use; each use resets the timer
 | Tool | For |
 | --- | --- |
 | `read` | a bounded window of a file, so a big file cannot flood the conversation |
-| `apply_patch` | create, edit, move or delete files in one all-or-nothing patch |
+| `apply_patch` | create, edit, move or delete files in one patch, checked before anything is written |
 | `exec_command` | git, builds, tests, package managers, servers — as your OS user |
 | `write_stdin` | keep reading a running command, answer its prompts, or stop it |
 

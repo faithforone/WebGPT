@@ -61,7 +61,7 @@ login, API key, organization role or paid account is needed.
      - hostname: <existing>
        service: http://127.0.0.1:<existing port>
      - hostname: <new hostname for this worker>
-       service: http://127.0.0.1:43147
+       service: http://127.0.0.1:<this worker's mcpPort>
      - service: http_status:404
    ```
 

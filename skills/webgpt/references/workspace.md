@@ -38,7 +38,10 @@ same trust applies. Do not expose a connection to people you would not give a sh
   `*** Move to: path` and `@@` sections of context, `-` and `+` lines, or `*** Delete File: path`,
   then `*** End Patch`. Context is matched exactly first, then ignoring trailing whitespace, then
   ignoring indentation; a `@@ header` line picks which copy of repeated context to use, and
-  `*** End of File` anchors a section to the end. Either every file action applies or none does.
+  `*** End of File` anchors a section to the end. Every file action is resolved against the tree
+  before the first write, so a patch that does not fit leaves the project untouched. That check is
+  not a filesystem transaction: a write that fails midway — a full disk, a permission error — can
+  leave earlier files of the same patch already written, so check the tree before retrying.
 - `exec_command(command, cwd?, shell?, tty?, yield_ms?, max_chars?)` starts a command. `tty:true`
   gives a real PTY. It returns the first bounded slice of output, `session_id`, `cursor`, `more`,
   and `running`/`exit_code`. Nothing kills or truncates the command itself.

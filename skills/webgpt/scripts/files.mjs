@@ -176,7 +176,9 @@ export function applyHunks(original, op) {
   return {text: out.join('\n') + (ending || !original ? '\n' : ''), added, removed};
 }
 
-// Nothing is written until every file action has been resolved against the tree.
+// Every file action is resolved against the tree before the first write, so a patch that does not
+// fit changes nothing. Past that point this is plain file IO, not a transaction: it does not undo
+// earlier writes if a later one fails, and it does not pretend to.
 export function applyPatch(root, patch) {
   const ops = parsePatch(patch);
   const seen = new Set(), writes = [], removals = [], files = [];
