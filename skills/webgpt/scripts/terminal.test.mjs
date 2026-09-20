@@ -20,6 +20,15 @@ test('a command runs and reports its exit status', async () => {
   await terminals.stop();
 });
 
+test('a short command answers with its exit status in one reply', async () => {
+  const terminals = new Terminals();
+  const started = await terminals.execute('a', grant, {command: 'printf done; exit 2'});
+  assert.equal(started.running, false);
+  assert.equal(started.exit_code, 2);
+  assert.equal(started.output, 'done');
+  await terminals.stop();
+});
+
 test('output is bounded per reply and continues at the cursor', async () => {
   const terminals = new Terminals();
   const started = await terminals.execute('a', grant, {command: 'node -e "process.stdout.write(\'x\'.repeat(20000))"', max_chars: 5000});

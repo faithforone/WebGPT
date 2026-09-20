@@ -102,6 +102,13 @@ test('additions can be anchored to the end of the file', () => {
   assert.equal(readFileSync(join(root, 'a.txt'), 'utf8'), 'one\ntwo\nthree\n');
 });
 
+test('a context line that lost its leading space is still context', () => {
+  const root = project();
+  writeFileSync(join(root, 'a.js'), 'run(() => {\n  keep();\n});\n');
+  applyPatch(root, patch('*** Update File: a.js', '@@', 'run(() => {', '-  keep();', '+  keep(1);', '});'));
+  assert.equal(readFileSync(join(root, 'a.js'), 'utf8'), 'run(() => {\n  keep(1);\n});\n');
+});
+
 test('the envelope is checked before anything is applied', () => {
   const root = project();
   writeFileSync(join(root, 'a.txt'), 'one\n');

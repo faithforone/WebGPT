@@ -103,9 +103,12 @@ export function parsePatch(patch) {
         if (text.startsWith('*** ')) throw Error('unexpected patch line: ' + text);
         if (!hunk) { hunk = {header: '', lines: [], eof: false}; op.hunks.push(hunk); }
         // A context line may arrive as a bare empty line rather than a single space.
+        // A context line often arrives without its leading space — a bare blank line, or a
+        // line like `});` copied straight out of the file. Read those as context rather than
+        // failing a turn over a space.
         if (text === '') hunk.lines.push({kind: ' ', text: ''});
         else if (' +-'.includes(text[0])) hunk.lines.push({kind: text[0], text: text.slice(1)});
-        else throw Error('a change line must start with a space, + or -: ' + text);
+        else hunk.lines.push({kind: ' ', text});
       }
       if (!op.hunks.some(h => h.lines.length)) throw Error('no changes given for ' + op.path);
       ops.push(op);

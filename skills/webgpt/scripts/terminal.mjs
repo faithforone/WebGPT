@@ -111,11 +111,14 @@ export class Terminals {
     if (!s.done && input) s.write(input);
     if (!s.done && signal) s.kill(signal);
     const waiting = () => s.head + s.text.length - Math.max(cursor ?? s.delivered, s.head);
-    // Yield the HTTP call, not the command. The wait ends as soon as there is something to read.
-    if (!s.done && waiting() <= 0 && yield_ms > 0) await new Promise(resolve => {
+    // Yield the HTTP call, not the command. A short command finishes inside this wait, so its
+    // exit status comes back with its output instead of costing another round trip; a long one
+    // returns what it has produced so far, and returns at once if a full reply is already waiting.
+    if (!s.done && waiting() < limit && yield_ms > 0) await new Promise(resolve => {
       let timer;
-      const finish = () => {clearTimeout(timer); s.listeners.delete(finish); resolve();};
-      s.listeners.add(finish);
+      const finish = () => {clearTimeout(timer); s.listeners.delete(check); resolve();};
+      const check = () => { if (s.done) finish(); };
+      s.listeners.add(check);
       timer = setTimeout(finish, Math.min(yield_ms, 25000));
     });
     const asked = cursor ?? s.delivered;
