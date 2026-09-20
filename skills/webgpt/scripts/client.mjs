@@ -2,9 +2,9 @@ import { readFileSync, existsSync, realpathSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, isAbsolute, basename } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { randomUUID, createHash } from 'node:crypto';
+import { createHash } from 'node:crypto';
 
-// Shared by the worker and controller client; never store configuration in the skill.
+// Shared by the worker and the controller client; never store configuration in the skill.
 export function configuration(env = process.env) {
   const file = env.WEBGPT_CONFIG ?? join(homedir(), '.config', 'webgpt', 'config.json');
   if (env.WEBGPT_CONFIG && !existsSync(file)) throw Error('WEBGPT_CONFIG file does not exist');
@@ -14,11 +14,9 @@ export function configuration(env = process.env) {
     dataDir: env.WEBGPT_DATA_DIR ?? saved.dataDir ?? join(homedir(), '.local', 'share', 'webgpt'),
     mcpPort: saved.mcpPort ?? 43137,
     controlPort: saved.controlPort ?? 43139,
-    publicMcp: saved.publicMcp ?? false,
-    ...(saved.publicOrigin ? { publicOrigin: saved.publicOrigin } : {}),
+    ...(saved.publicOrigin ? {publicOrigin: saved.publicOrigin} : {}),
   };
   if (typeof config.dataDir !== 'string' || !isAbsolute(config.dataDir)) throw Error('dataDir must be absolute');
-  if (typeof config.publicMcp !== 'boolean') throw Error('publicMcp must be boolean');
   for (const key of ['mcpPort', 'controlPort']) {
     if (!Number.isInteger(config[key]) || config[key] < 1 || config[key] > 65535) throw Error('invalid ' + key);
   }
@@ -31,47 +29,14 @@ export function configuration(env = process.env) {
   return config;
 }
 
-// Reuse an unexpired project lease without renewing it or restarting the shared worker.
-export async function openProject(cwd = process.cwd(), config = configuration(), now = Date.now()) {
-  cwd = realpathSync(cwd);
-  const statePath = join(config.dataDir, 'state.json');
-  const tasks = existsSync(statePath) ? JSON.parse(readFileSync(statePath, 'utf8')) : [];
-  const existing = tasks.find(t => t.mode === 'open' && t.status === 'running' && !t.collected &&
-    t.openKey && t.token && t.terminal?.cwd === cwd && now - t.lastUsed < 86400000);
-  let result;
-  if (existing) {
-    const response = await fetch(`http://127.0.0.1:${config.mcpPort}/open/${existing.openKey}`, {
-      method: 'POST', headers: {'content-type':'application/json'},
-      body: JSON.stringify({jsonrpc:'2.0',id:1,method:'tools/list'}), signal: AbortSignal.timeout(10000),
-    });
-    if (response.ok && (await response.json()).result?.tools?.length === 2)
-      result = {id:existing.id,mode:'open',connectionPath:'/open/'+existing.openKey,idleExpiresAt:existing.lastUsed+86400000,reused:true};
-    else if (response.status !== 404) throw Error('Existing open connection could not be verified');
-  }
-  if (!result) {
-    result = await request('register', {mode:'open',terminal:{cwd}}, config);
-    if (!result.connectionPath) {
-      await request('cancel', {id:result.id}, config);
-      throw Error('Running worker needs an update for message-free open; preserve active sessions and restart when idle');
-    }
-    delete result.token;
-    result.reused = false;
-  }
-  const suffix = createHash('sha256').update((config.publicOrigin ?? '') + result.id).digest('hex').slice(0,8);
-  return {...result,project:cwd,connectionName:`WebGPT Open ${basename(cwd)} ${suffix}`,
-    ...(config.publicOrigin ? {connectionUrl:config.publicOrigin+result.connectionPath} : {needsPublicOrigin:true})};
-}
-
 export async function request(action, payload, config = configuration()) {
-  const read = ['wait', 'status'].includes(action);
-  if (!read && !['register', 'ack', 'checked', 'cancel'].includes(action)) throw Error('unknown controller action');
-  if (read ? payload !== undefined && !(action === 'wait' && Array.isArray(payload?.ids) && payload.ids.length && payload.ids.every(id => typeof id === 'string')) : !payload || typeof payload !== 'object') throw Error('invalid controller payload');
-  if (action === 'register') payload = { id: randomUUID(), instructions: '', inputs: {}, ...payload };
+  if (!['open', 'close', 'status'].includes(action)) throw Error('unknown controller action');
+  const read = action === 'status';
+  if (!read && (!payload || typeof payload !== 'object')) throw Error('invalid controller payload');
   const key = readFileSync(join(config.dataDir, 'controller.key'), 'utf8');
-  const query = action === 'wait' && payload ? '?' + new URLSearchParams(payload.ids.map(id => ['id', id])) : '';
-  const response = await fetch('http://127.0.0.1:' + config.controlPort + '/' + action + query, {
+  const response = await fetch('http://127.0.0.1:' + config.controlPort + '/' + action, {
     method: read ? 'GET' : 'POST',
-    headers: { authorization: 'Bearer ' + key, 'content-type': 'application/json' },
+    headers: {authorization: 'Bearer ' + key, 'content-type': 'application/json'},
     body: read ? undefined : JSON.stringify(payload),
     signal: AbortSignal.timeout(60000),
   });
@@ -80,52 +45,28 @@ export async function request(action, payload, config = configuration()) {
   return result;
 }
 
-// HTTP renewals stay here, not in model turns. Return only actionable task state.
-export async function waitForTasks(ids, config = configuration(), read = request) {
-  for (;;) {
-    const result = await read('wait', { ids }, config);
-    if (result.events.length || result.backupDue.length || result.recoveryRequired?.length || result.settled) return result;
-  }
-}
-
-// Verify the saved artifact before retiring access. Collection is not a code-quality verdict.
-export async function collectTask(id, config = configuration()) {
-  const result = await request('wait', { ids: [id] }, config);
-  const event = result.events.find(event => event.id === id);
-  if (!event) throw Error('task has no uncollected result');
-  const bytes = readFileSync(event.artifact);
-  if (createHash('sha256').update(bytes).digest('hex') !== event.sha256) throw Error('saved result integrity mismatch');
-  await request('ack', { id }, config);
-  return { ...event, integrity: 'verified', collected: true };
+// The same project keeps the same connection: reopening returns the live one instead of
+// stranding the old chat, and only terminal use renews its idle lease.
+export async function openProject(cwd = process.cwd(), config = configuration()) {
+  const result = await request('open', {cwd: realpathSync(cwd)}, config);
+  const suffix = createHash('sha256').update((config.publicOrigin ?? '') + result.id).digest('hex').slice(0, 8);
+  return {...result, connectionName: 'WebGPT ' + basename(result.project) + ' ' + suffix,
+    ...(config.publicOrigin ? {connectionUrl: config.publicOrigin + result.path} : {needsPublicOrigin: true})};
 }
 
 if (process.argv[1] && process.argv[1] !== '-' && import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
   try {
     const [action, ...args] = process.argv.slice(2);
     let result;
-    if (action === 'wait') {
-      // Accept the previous JSON-file form as well as plain returned IDs.
-      const saved = args.length === 1 && existsSync(args[0]) ? JSON.parse(readFileSync(args[0], 'utf8')) : null;
-      const ids = saved ? saved.ids ?? [saved.id] : args;
-      if (!ids.length) throw Error('usage: client.mjs wait <task-id> [task-id ...]');
-      result = await waitForTasks(ids);
-    } else if (action === 'collect') {
-      if (args.length !== 1) throw Error('usage: client.mjs collect <task-id>');
-      result = await collectTask(args[0]);
-    } else if (action === 'open') {
+    if (action === 'open') {
       if (args.length > 1) throw Error('usage: client.mjs open [project-directory]');
       result = await openProject(args[0]);
-    } else if (action === 'register' && args[0] === '--cwd') {
-      if (args.length !== 2) throw Error('usage: client.mjs register --cwd <project-directory>');
-      result = await request('register', { terminal: { cwd: args[1] } });
-    } else if (['ack', 'checked', 'cancel'].includes(action)) {
-      if (args.length !== 1) throw Error(`usage: client.mjs ${action} <task-id|json-file>`);
-      const payload = existsSync(args[0]) ? JSON.parse(readFileSync(args[0], 'utf8')) : { id: args[0] };
-      result = await request(action, payload);
-    } else {
-      const payload = args[0] ? JSON.parse(readFileSync(args[0], 'utf8')) : undefined;
-      result = await request(action, payload);
-    }
+    } else if (action === 'status') {
+      result = await request('status');
+    } else if (action === 'close') {
+      if (args.length !== 1) throw Error('usage: client.mjs close <project-directory|session-id>');
+      result = await request('close', isAbsolute(args[0]) ? {cwd: realpathSync(args[0])} : {id: args[0]});
+    } else throw Error('usage: client.mjs open|status|close');
     console.log(JSON.stringify(result));
   } catch (error) {
     console.error('WebGPT: ' + error.message);
