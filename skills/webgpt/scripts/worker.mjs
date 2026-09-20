@@ -31,6 +31,9 @@ export async function start({dir, port = 43137, controlPort = 43139, idleMs = ID
   writeFileSync(resolve(lock, 'owner.json'), JSON.stringify({pid: process.pid, host: hostname()}), {mode: 0o600});
   const statePath = resolve(dir, 'sessions.json'), keyPath = resolve(dir, 'controller.key');
   const key = existsSync(keyPath) ? readFileSync(keyPath, 'utf8') : randomUUID();
+  // Identifies this running worker to whoever configured the tunnel route, so an origin
+  // pointed at a different worker is caught before a connection is handed to anyone.
+  const instance = randomBytes(8).toString('hex');
   if (!existsSync(keyPath)) writeFileSync(keyPath, key, {mode: 0o600, flag: 'wx'});
   // The connection URL is the capability that authenticates the remote MCP connection.
   // Keep it out of stdout, chat messages and HTTP error responses.
@@ -65,7 +68,7 @@ export async function start({dir, port = 43137, controlPort = 43139, idleMs = ID
   };
   const mcp = createServer(async (req, res) => {
     if (req.headers.origin) return json(res, 403, {});
-    if (req.method === 'GET' && req.url === '/health') return json(res, 200, {ok: true, name: 'WebGPT'});
+    if (req.method === 'GET' && req.url === '/health') return json(res, 200, {ok: true, name: 'WebGPT', instance});
     await expireIdle();
     const opened = (req.url ?? '').match(/^\/open\/([a-f0-9]{64})$/)?.[1];
     const session = opened && sessions.find(s => s.key === opened);
@@ -122,7 +125,7 @@ export async function start({dir, port = 43137, controlPort = 43139, idleMs = ID
   try { await listen(mcp, port); await listen(control, controlPort); } catch (e) { mcp.close(); control.close(); throw e; }
   let closed = false;
   const idleTimer = setInterval(() => expireIdle().catch(error => console.error('WebGPT idle cleanup:', error.message)), idleSweepMs); idleTimer.unref();
-  return {mcpPort: mcp.address().port, controlPort: control.address().port, key, expireIdle,
+  return {mcpPort: mcp.address().port, controlPort: control.address().port, key, instance, expireIdle,
     close: async () => { if (closed) return; closed = true; clearInterval(idleTimer);
       await Promise.all([mcp, control].map(s => new Promise(r => { s.closeAllConnections(); s.close(r); })));
       await terminals.stop(); release(); }};

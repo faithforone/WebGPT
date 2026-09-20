@@ -47,25 +47,46 @@ other path returns 404, and a request carrying a browser `Origin` header is refu
 
 ## ChatGPT connection
 
-Reuse the verified HTTPS forwarding and configuration. No OpenAI Platform login, API key,
-organization role or paid account is needed.
+The connection must reach the worker through a credentialed tunnel. A direct address — the
+loopback port, a LAN address, a forwarded port on the router — is not an operational path, and
+`publicOrigin` refuses one. An ephemeral quick tunnel is for a lab, not for use: its hostname
+changes on every restart, which is the same stale-URL failure by another name. No OpenAI Platform
+login, API key, organization role or paid account is needed.
 
-1. Reuse authorized HTTPS forwarding, or install official `cloudflared` and run
-   `cloudflared tunnel --url http://127.0.0.1:43137` with the configured MCP port. Quick Tunnels need
-   no account. Preserve other tunnel configurations, keep the owned tunnel alive with the OS service
-   manager, and never forward the controller port or a project directory.
-2. Save the forwarding origin as `publicOrigin` in the config, origin only, without any path.
-3. Run `client.mjs open /absolute/project` and register its returned `connectionName` and
-   `connectionUrl` in ChatGPT's connectors as a URL connection with no OAuth. Read the URL into the
-   form privately, never through prompts, screenshots or logs. The URL is the capability: it binds
-   that project and exposes only its four tools.
-4. Refresh discovery and verify `read`, `apply_patch`, `exec_command` and `write_stdin`, with no
-   task, result or CRUD tools left from an older installation. If the UI cannot update a connection,
-   verify a replacement before removing only the obsolete WebGPT registration. Preserve other
-   connectors.
+1. Reuse the tunnel that already exists on the machine. Add one hostname for this worker to its
+   ingress rules, above the catch-all, and leave every existing rule untouched:
 
-Quick Tunnel origins change after a restart: compare the live origin and update the connection.
-Do not promise permanent URLs or automatic reconnection.
+   ```yaml
+   ingress:
+     - hostname: <existing>
+       service: http://127.0.0.1:<existing port>
+     - hostname: <new hostname for this worker>
+       service: http://127.0.0.1:43147
+     - service: http_status:404
+   ```
+
+   Back the file up first, then check it with `cloudflared --config <file> tunnel ingress validate`
+   and `... tunnel ingress rule <url>` before applying anything. Route the new hostname to the same
+   tunnel (`cloudflared tunnel route dns <tunnel> <hostname>`), which adds one proxied DNS record.
+   Applying the change restarts the tunnel process under its service manager, so both hostnames are
+   briefly unreachable: do it while nothing is mid-call. Do not put an access policy in front of the
+   hostname — the connection carries no OAuth and would simply be refused.
+
+2. Save that hostname as `publicOrigin` in this worker's config, origin only, no path. Each worker
+   has its own config file, so two workers on one machine never share an origin.
+
+3. Run `client.mjs open /absolute/project`. It checks that the origin really answers as this worker
+   before writing anything: a rerouted or restarted tunnel is refused here rather than by a
+   connection that returns 404 to a conversation. It prints the connection name and where the URL
+   was written, and never prints the URL itself.
+
+4. Register that name and URL in ChatGPT's connectors as a URL connection with no OAuth, reading
+   the URL out of `<dataDir>/connection.json` straight into the form. Refresh discovery and verify
+   `read`, `apply_patch`, `exec_command` and `write_stdin`, with no task, result or CRUD tools left
+   from another worker. Preserve other connectors; never repoint an existing one.
+
+The URL is this machine's shell in a link. It belongs in that file and in the connector form, never
+in a chat message, a screenshot, a report, a log or a command line.
 
 ## End-to-end test
 

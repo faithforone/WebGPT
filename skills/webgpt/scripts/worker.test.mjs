@@ -52,7 +52,10 @@ test('the route serves this project, and nothing else answers', async t => {
   assert.equal((await fetch(mcp + '/open/')).status, 404);
   assert.equal((await fetch(mcp + path)).status, 405);
   assert.equal((await fetch(mcp + path, {method: 'POST', headers: {origin: 'https://chatgpt.com'}, body: '{}'})).status, 403);
-  assert.deepEqual(await (await fetch(mcp + '/health')).json(), {ok: true, name: 'WebGPT'});
+  const health = await (await fetch(mcp + '/health')).json();
+  assert.equal(health.name, 'WebGPT');
+  assert.match(health.instance, /^[a-f0-9]{16}$/);
+  assert.deepEqual(await (await fetch(mcp + '/health')).json(), health);
 });
 
 test('the four tools do the work of a local developer', async t => {

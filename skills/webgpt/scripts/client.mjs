@@ -1,4 +1,4 @@
-import { readFileSync, existsSync, realpathSync } from 'node:fs';
+import { readFileSync, writeFileSync, unlinkSync, existsSync, realpathSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, isAbsolute, basename } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -24,9 +24,18 @@ export function configuration(env = process.env) {
   if (config.publicOrigin) {
     const url = new URL(config.publicOrigin);
     if (url.protocol !== 'https:' || url.username || url.password || url.search || url.hash || url.pathname !== '/') throw Error('publicOrigin must be an HTTPS origin');
+    if (direct(url.hostname)) throw Error('publicOrigin must be a tunnel hostname, not a direct address: ' + url.hostname);
     config.publicOrigin = url.origin;
   }
   return config;
+}
+
+// ChatGPT reaches the worker through the tunnel and nowhere else. A bare address, or a name
+// that only means something on this machine, is something pointed straight at the worker.
+function direct(hostname) {
+  const bare = hostname.replace(/^\[|\]$/g, '');
+  return /^\d{1,3}(\.\d{1,3}){3}$/.test(bare) || bare.includes(':')
+    || /^(localhost|.*\.localhost|.*\.local|.*\.internal|.*\.home\.arpa)$/i.test(bare);
 }
 
 export async function request(action, payload, config = configuration()) {
@@ -50,8 +59,37 @@ export async function request(action, payload, config = configuration()) {
 export async function openProject(cwd = process.cwd(), config = configuration()) {
   const result = await request('open', {cwd: realpathSync(cwd)}, config);
   const suffix = createHash('sha256').update((config.publicOrigin ?? '') + result.id).digest('hex').slice(0, 8);
-  return {...result, connectionName: 'WebGPT ' + basename(result.project) + ' ' + suffix,
-    ...(config.publicOrigin ? {connectionUrl: config.publicOrigin + result.path} : {needsPublicOrigin: true})};
+  const connectionName = 'WebGPT ' + basename(result.project) + ' ' + suffix;
+  const open = {id: result.id, project: result.project, reused: result.reused,
+    idleExpiresAt: result.idleExpiresAt, connectionName};
+  if (!config.publicOrigin) return {...open, needsPublicOrigin: true};
+  const origin = await originServing(config);
+  // The URL is this machine's shell in a link. It goes to one private file and is never
+  // returned, printed or passed along; whoever registers the connection reads it there.
+  const connectionFile = join(config.dataDir, 'connection.json');
+  writeFileSync(connectionFile, JSON.stringify({...open, connectionUrl: config.publicOrigin + result.path,
+    origin}, null, 2) + '\n', {mode: 0o600});
+  return {...open, origin, connectionFile};
+}
+
+async function health(base) {
+  const response = await fetch(base + '/health', {signal: AbortSignal.timeout(15000)});
+  if (!response.ok) throw Error('health check answered ' + response.status);
+  return response.json();
+}
+
+// A tunnel that was restarted, rerouted, or pointed at the other worker on this machine
+// is caught here rather than by a connection that answers 404 to a conversation.
+async function originServing(config) {
+  let mine;
+  try { mine = await health('http://127.0.0.1:' + config.mcpPort); }
+  catch (error) { throw Error('this worker does not answer on its own MCP port: ' + error.message); }
+  let theirs;
+  try { theirs = await health(config.publicOrigin); }
+  catch { return 'unreachable'; }
+  if (theirs.name !== mine.name || theirs.instance !== mine.instance)
+    throw Error('publicOrigin serves a different worker (' + (theirs.name ?? 'unknown') + '); fix the tunnel route before connecting');
+  return 'verified';
 }
 
 if (process.argv[1] && process.argv[1] !== '-' && import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
@@ -66,6 +104,8 @@ if (process.argv[1] && process.argv[1] !== '-' && import.meta.url === pathToFile
     } else if (action === 'close') {
       if (args.length !== 1) throw Error('usage: client.mjs close <project-directory|session-id>');
       result = await request('close', isAbsolute(args[0]) ? {cwd: realpathSync(args[0])} : {id: args[0]});
+      const artifact = join(configuration().dataDir, 'connection.json');
+      if (existsSync(artifact) && JSON.parse(readFileSync(artifact, 'utf8')).id === result.id) unlinkSync(artifact);
     } else throw Error('usage: client.mjs open|status|close');
     console.log(JSON.stringify(result));
   } catch (error) {

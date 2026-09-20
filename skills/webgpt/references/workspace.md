@@ -13,15 +13,20 @@ same trust applies. Do not expose a connection to people you would not give a sh
 ## Open, list, close
 
 - `node <skill>/scripts/client.mjs open [/absolute/project]` — defaults to the current directory.
-  Returns `id`, `project`, `connectionName`, `connectionUrl` (when `publicOrigin` is configured,
-  `needsPublicOrigin` otherwise), `idleExpiresAt` and `reused`. The same project always gets the
-  same live connection; reopening does not renew its lease, only terminal use does. Chats sharing a
-  project share that connection. The URL is the capability: keep it out of chats, screenshots and
-  reports. Expired or closed URLs stay revoked and return 404; a fresh session gets a new URL and
-  name, so never repoint an old connection at a new project.
+  Returns `id`, `project`, `connectionName`, `idleExpiresAt`, `reused`, and where the connection
+  file was written; with no `publicOrigin` configured it returns `needsPublicOrigin` instead. The
+  URL is written only to `<dataDir>/connection.json` (0600) and is never printed or returned, so
+  registering a connection means reading that file. `origin` says what was checked: `verified`
+  means the configured origin answered as this exact worker, `unreachable` means it could not be
+  reached from here; an origin that answers as a different worker is refused outright. The same
+  project always gets the same live connection; reopening does not renew its lease, only terminal
+  use does. Chats sharing a project share that connection. Expired or closed URLs stay revoked and
+  return 404; a fresh session gets a new URL and name, so never repoint an old connection at a new
+  project.
 - `client.mjs status` — open projects, when each lease expires, whether a command is running.
   It never prints connection URLs.
-- `client.mjs close <project|id>` — ends a session now and stops its commands.
+- `client.mjs close <project|id>` — ends a session now, stops its commands, and removes the
+  connection file when it belonged to that session.
 
 ## The tools
 
