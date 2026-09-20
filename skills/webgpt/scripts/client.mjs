@@ -1,8 +1,7 @@
 import { readFileSync, writeFileSync, unlinkSync, existsSync, realpathSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { join, isAbsolute, basename } from 'node:path';
+import { join, isAbsolute } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { createHash } from 'node:crypto';
 
 // Shared by the worker and the controller client; never store configuration in the skill.
 export function configuration(env = process.env) {
@@ -58,8 +57,10 @@ export async function request(action, payload, config = configuration()) {
 // stranding the old chat, and only terminal use renews its idle lease.
 export async function openProject(cwd = process.cwd(), config = configuration()) {
   const result = await request('open', {cwd: realpathSync(cwd)}, config);
-  const suffix = createHash('sha256').update((config.publicOrigin ?? '') + result.id).digest('hex').slice(0, 8);
-  const connectionName = 'WebGPT ' + basename(result.project) + ' ' + suffix;
+  // A label for the client's connector list, nothing more: which project this is and who may
+  // reach it are the URL and the session's binding, and repeating them in a name only invites
+  // reading identity off a string. Distinguish several connections here when several exist.
+  const connectionName = 'WebGPT Core';
   const open = {id: result.id, project: result.project, reused: result.reused,
     idleExpiresAt: result.idleExpiresAt, connectionName};
   if (!config.publicOrigin) return {...open, needsPublicOrigin: true};

@@ -16,7 +16,10 @@ same trust applies. Do not expose a connection to people you would not give a sh
   Returns `id`, `project`, `connectionName`, `idleExpiresAt`, `reused`, and where the connection
   file was written; with no `publicOrigin` configured it returns `needsPublicOrigin` instead. The
   URL is written only to `<dataDir>/connection.json` (0600) and is never printed or returned, so
-  registering a connection means reading that file. `origin` says what was checked: `verified`
+  registering a connection means reading that file. `connectionName` is a label for the client's
+  connector list — always `WebGPT Core` — not an identifier: the URL and the session's binding are
+  what say which project a connection reaches. Tell several registered connections apart in the
+  client, by renaming them there. `origin` says what was checked: `verified`
   means the configured origin answered as this exact worker, `unreachable` means it could not be
   reached from here; an origin that answers as a different worker is refused outright. The same
   project always gets the same live connection; reopening does not renew its lease, only terminal

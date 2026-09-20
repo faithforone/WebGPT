@@ -46,7 +46,7 @@ test('opening a project keeps the URL in one private file and out of the result'
   const config = {dataDir: data, mcpPort: service.mcpPort, controlPort: service.controlPort,
     publicOrigin: 'http://127.0.0.1:' + service.mcpPort};
   const opened = await openProject(project, config);
-  assert.match(opened.connectionName, /^WebGPT .+ [a-f0-9]{8}$/);
+  assert.equal(opened.connectionName, 'WebGPT Core');
   assert.deepEqual([opened.reused, opened.origin], [false, 'verified']);
   assert.equal(JSON.stringify(opened).includes('/open/'), false);
   assert.equal(opened.connectionUrl, undefined);
@@ -57,8 +57,11 @@ test('opening a project keeps the URL in one private file and out of the result'
 
   const again = await openProject(project, config);
   assert.deepEqual([again.connectionName, again.reused], [opened.connectionName, true]);
+  // The name is a label, so another project shares it; the session is what tells them apart.
   const other = await openProject(dir(), config);
-  assert.notEqual(other.connectionName, opened.connectionName);
+  assert.equal(other.connectionName, opened.connectionName);
+  assert.notEqual(other.id, opened.id);
+  assert.notEqual(other.project, opened.project);
 
   const local = await openProject(project, {...config, publicOrigin: undefined});
   assert.equal(local.needsPublicOrigin, true);
